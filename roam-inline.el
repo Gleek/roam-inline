@@ -29,12 +29,6 @@ Move this line to move the section.  If the buffer has no such line, the
 section goes at the end of the buffer.  See `roam-inline-move-here'."
   :type 'string :group 'roam-inline)
 
-(defcustom roam-inline-separator "\n-------\n\n"
-  "Text inserted before backlinks and unlinked references.
-A newline is appended if the text does not end with one.
-Set to an empty string to omit the separator."
-  :type 'string :group 'roam-inline)
-
 (defvar-local roam-inline-show-unlinked nil)
 
 (defvar roam-inline--file-cache nil
@@ -127,7 +121,18 @@ Return non-nil when an anchor line was used."
   (let ((ov (make-overlay beg end)))
     (overlay-put ov 'keymap roam-inline-map)
     (overlay-put ov 'roam-inline t)
-    (overlay-put ov 'evaporate t)))
+    (overlay-put ov 'evaporate t))
+  (let* ((heading (save-excursion (goto-char beg) (skip-chars-forward "\n" end) (point)))
+         (ov (make-overlay heading heading)))
+    (overlay-put ov 'roam-inline t)
+    (overlay-put ov 'before-string (roam-inline--separator-string))))
+
+(defun roam-inline--separator-string ()
+  "Return a horizontal rule that spans the window's text area."
+  (concat "\n"
+          (propertize " " 'display '(space :align-to right)
+                      'face '(:inherit shadow :underline t))
+          "\n\n"))
 
 (defun roam-inline--insert ()
   (when-let* ((node (or (org-roam-node-at-point)
@@ -150,11 +155,7 @@ Return non-nil when an anchor line was used."
                   (save-excursion
                     (goto-char beg)
                     ;; Include any added newline in the generated section.
-                    (when (or anchored (not (bolp))) (insert "\n"))
-                    (unless (string-empty-p roam-inline-separator)
-                      (insert roam-inline-separator)
-                      (unless (string-suffix-p "\n" roam-inline-separator)
-                        (insert "\n"))))
+                    (when (or anchored (not (bolp))) (insert "\n")))
                   (roam-inline--seal beg (point))))))
         (maphash (lambda (_file buf) (when (buffer-live-p buf) (kill-buffer buf)))
                  roam-inline--file-cache)))))
