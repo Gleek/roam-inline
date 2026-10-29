@@ -96,34 +96,37 @@ backlinks point into it.")
         (let ((pos (point-min)) start)
           (while (setq start (text-property-any pos (point-max) 'roam-inline-start t))
             (if (get-text-property start 'roam-inline-managed)
-                (delete-region
-                 start (or (next-single-property-change start 'roam-inline-managed)
-                           (point-max)))
+                (progn
+                  (save-excursion
+                    (goto-char start)
+                    ;; Preserve the preceding line if its separator was deleted.
+                    (unless (bolp)
+                      (insert "\n")
+                      (setq start (1+ start))))
+                  (delete-region
+                   start (or (next-single-property-change start 'roam-inline-managed)
+                             (point-max))))
               (remove-text-properties start (1+ start) '(roam-inline-start nil)))
             (setq pos start)))))))
 
 (defun roam-inline--goto-anchor ()
-  "Move point to where the section goes.
-Return non-nil when an anchor line was used."
+  "Move point after the anchor line, or to the end of the buffer."
   (goto-char (point-min))
   (if (re-search-forward (roam-inline--anchor-regexp) nil t)
-      (progn (end-of-line) t)
-    (goto-char (point-max))
-    nil))
+      (forward-line 1)
+    (goto-char (point-max))))
 
 (defun roam-inline--seal (beg end)
   "Mark BEG..END as generated, read-only, and bind the section keymap."
   (add-text-properties beg end '(roam-inline-managed t
                                  read-only t
-                                 rear-nonsticky (roam-inline-managed)))
-  (add-text-properties beg (1+ beg) '(roam-inline-start t
-                                      front-sticky (read-only)))
-  (let ((ov (make-overlay beg end)))
+                                 rear-nonsticky t))
+  (add-text-properties beg (1+ beg) '(roam-inline-start t))
+  (let ((ov (make-overlay beg end nil t)))
     (overlay-put ov 'keymap roam-inline-map)
     (overlay-put ov 'roam-inline t)
     (overlay-put ov 'evaporate t))
-  (let* ((heading (save-excursion (goto-char beg) (skip-chars-forward "\n" end) (point)))
-         (ov (make-overlay heading heading)))
+  (let ((ov (make-overlay beg beg nil t t)))
     (overlay-put ov 'roam-inline t)
     (overlay-put ov 'before-string (roam-inline--separator-string))))
 
@@ -146,16 +149,19 @@ Return non-nil when an anchor line was used."
           (save-excursion
             (save-restriction
               (widen)
-              (let* ((anchored (roam-inline--goto-anchor))
-                     (beg (point)))
+              (roam-inline--goto-anchor)
+              (let ((beg (point)))
                 (when backlinks
                   (roam-inline--insert-backlinks backlinks))
                 (roam-inline--insert-unlinked-section node)
                 (when (> (point) beg)
                   (save-excursion
                     (goto-char beg)
-                    ;; Include any added newline in the generated section.
-                    (when (or anchored (not (bolp))) (insert "\n")))
+                    ;; The editable separator survives pruning and is repaired
+                    ;; on refresh if the user removes it.
+                    (unless (bolp)
+                      (insert "\n")
+                      (setq beg (1+ beg))))
                   (roam-inline--seal beg (point))))))
         (maphash (lambda (_file buf) (when (buffer-live-p buf) (kill-buffer buf)))
                  roam-inline--file-cache)))))
